@@ -1,13 +1,10 @@
 
-# Parses the AAIndex(1) to obtain 566 different continuous, numerical indices of
-# amino acid properties, which are then plotted against the structural features
-# of interest
+# Parses the AAIndex1 to obtain 566 different continuous, numerical indices
+# of amino acid properties, which are then appended to the output DataGen
+# dataframe of the CATH / SCOPe domain(s) of interest
 
-import os
-import shutil
+import pickle
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
 from collections import OrderedDict
 
 aa_positions_dict = OrderedDict({'A': [0, 0],
@@ -31,7 +28,7 @@ aa_positions_dict = OrderedDict({'A': [0, 0],
                                  'Y': [0, 9],
                                  'V': [1, 9]})
 
-# Parses the AAIndex(1)
+# Parses the AAIndex1
 with open('docs/AAindex1.txt', 'r') as aa_index_file:
     file_lines = [line for line in aa_index_file.readlines() if line.strip()
                   != '\n']
@@ -42,6 +39,8 @@ indices_desc = OrderedDict()
 unprocessed_indices = []
 
 index_summaries = file_lines.split('//')
+index_summaries = [index_summary for index_summary in index_summaries if
+                   index_summary != '\n']
 for aa_index in index_summaries:
     id = ''
     desc = ''
@@ -49,11 +48,15 @@ for aa_index in index_summaries:
 
     lines = aa_index.split('\n')
     for i, line in enumerate(lines):
-        if line.startswith('H'):
-            id = line.strip('H').strip()
-        elif line.startswith('D'):
-            desc = line.strip('D').strip()
-        elif line.startswith('I'):
+        if line[0:1] == 'H':
+            id = line.lstrip('H').strip()
+        elif line[0:1] == 'D':
+            desc = line.lstrip('D').strip()
+            count = 1
+            while lines[i+count][0:1] != 'R':
+                desc += ' ' + lines[i+count].strip()
+                count += 1
+        elif line[0:1] == 'I':
             index_lines = lines[i+1: i+3]
             index_dict = OrderedDict({'A': '',
                                       'R': '',
@@ -91,17 +94,16 @@ for aa_index in index_summaries:
     else:
         unprocessed_indices.append(aa_index)
 
-# Loads dataframe output from DataGen and draws plots of every amino acid index
-# vs. 3 structural features (buried surface area (and core vs. surface),
-# residue displacement from the centre of the strand (both absolute and %, as
-# both a discrete and a continuous variable), and edge vs. central)
-if os.path.isdir('Figures'):
-    shutil.rmtree('Figures')
-os.mkdir('Figures')
+print('Unprocessed indices: ', unprocessed_indices)
 
-res_df = pd.read_pickle(
-    '/Users/ks17361/Lab_work_DW/Beta_structure/Parametrisation/Beta_datasets/CATH_2.60.40.10_resn_1.6_rfac_0.2_40_alignment/Beta_res_dataframe.pkl'
-)
+# Loads dataframe output from DataGen and appends AAindex1 values
+file_name = input('Specify absolute file path of DataGen dataframe for '
+                  'analysis: ')
+file_name = ('/Users/ks17361/Lab_work_DW/Beta_structure/Parametrisation/' +
+             'Beta_datasets/CATH_2.60.40.10_resn_1.6_rfac_0.2_40_alignment/' +
+             'Beta_res_dataframe.pkl')  # DELETE ME!
+res_df = pd.read_pickle(file_name)
+
 fasta = res_df['FASTA'].tolist()
 for index in list(aa_indices.keys()):
     print('Calculating {} index scores'.format(index))
@@ -110,40 +112,13 @@ for index in list(aa_indices.keys()):
     for i, aa in enumerate(fasta):
         if aa in list(aa_positions_dict.keys()):
             index_df[i] = aa_indices[index][aa]
+        else:
+            index_df[i] = 'NA'
 
     index_df = pd.DataFrame({'{}'.format(index): index_df})
 
     res_df = pd.concat([res_df, index_df], axis=1)
 
 res_df.to_csv('Beta_res_dataframe_AA_index.csv')
-
-structural_features = ['EDGE_OR_CNTRL', 'BURIED_SURFACE_AREA()%)',
-                       'STRAND_POS(ABS)', 'STRAND_POS(%)', 'CORE_OR_SURFACE']
-for index in list(aa_indices.keys()):
-    for feature in structural_features:
-        x = res_df['{}'.format(index)]
-        y = res_df['{}'.format(feature)]
-
-        if feature in ['EDGE_OR_CNTRL', 'CORE_OR_SURFACE']:
-            new_y = []
-            for entry in y:
-                if entry in ['edge', 'core']:
-                    new_y.append(1)
-                elif entry in ['central', 'surface']:
-                    new_y.append(0)
-                else:
-                    new_y.append('NA')
-        y = new_y
-        df = pd.DataFrame({'{}'.format(index): x,
-                           '{}'.format(feature): y})
-        df = df[~df['{}'.format(index)].isin(['', 'NA'])]
-        df = df.reset_index(drop=True)
-        df = df[~df['{}'.format(feature)].isin(['', 'NA'])]
-        df = df.reset_index(drop=True)
-
-        plt.clf()
-        plt.plot(x=df['{}'.format(index)].tolist(), y=df['{}'.format(feature)].tolist())
-        plt.show()
-        import sys
-        sys.exit()
-        plt.savefig()
+with open('AAIndices_dicts.pkl', 'wb') as pkl_dicts:
+    pickle.dump((aa_indices, indices_desc), pkl_dicts)
